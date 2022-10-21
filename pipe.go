@@ -20,6 +20,7 @@ import (
 
 var noHello = regexp.MustCompile("unknown command .?HELLO.?")
 
+// wire 通过 tcp 连接向 redis 发送命令
 type wire interface {
 	Do(ctx context.Context, cmd cmds.Completed) RedisResult
 	DoCache(ctx context.Context, cmd cmds.Cacheable, ttl time.Duration) RedisResult
@@ -41,21 +42,21 @@ type pipe struct {
 	state   int32
 	version int32
 	blcksig int32
-	timeout time.Duration
-	pinggap time.Duration
+	timeout time.Duration // net.Conn.SetWriteDeadline
+	pinggap time.Duration //@question: 猜测是 redis 连接监控检查超时
 
-	r *bufio.Reader
-	w *bufio.Writer
+	r *bufio.Reader // 包装 conn 的 reader bufio
+	w *bufio.Writer // 包装 conn 的 write bufio
 
-	conn  net.Conn
-	cache cache
-	queue queue
+	conn  net.Conn // 底层 tcp 连接
+	cache cache    // lru cache
+	queue queue    // 一个环形队列
 	once  sync.Once
 
 	info  map[string]RedisMessage
-	nsubs *subs
-	psubs *subs
-	ssubs *subs
+	nsubs *subs //@question：可能是发布订阅使用
+	psubs *subs //@question：可能是发布订阅使用
+	ssubs *subs //@question：可能是发布订阅使用
 	pshks atomic.Value
 	error atomic.Value
 
@@ -64,7 +65,7 @@ type pipe struct {
 	r2psFn func() (p *pipe, err error)
 	r2mu   sync.Mutex
 	r2pipe *pipe
-	r2ps   bool
+	r2ps   bool //@question: 不懂
 }
 
 func newPipe(connFn func() (net.Conn, error), option *ClientOption) (p *pipe, err error) {

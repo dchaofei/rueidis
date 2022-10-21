@@ -39,15 +39,18 @@ type conn interface {
 
 var _ conn = (*mux)(nil)
 
+// mux 多路复用，存有多个 tcp 连接，选一个向 redis 发送请求
 type mux struct {
+	// 为什么传进来 init 是 (*pipe)(nil) 初始传进来的链接
+	// 刚开始会使用 init 填充 wire 列表，wire 是 atomic.Value 类型，猜测填充是为了以后 Load 出来不用再断言类型了
 	init   wire
-	dead   wire
-	wire   []atomic.Value
-	sc     []*singleconnect
-	mu     []sync.Mutex
-	pool   *pool
-	wireFn wireFn
-	dst    string
+	dead   wire             //@question: 关掉状态的 wire，比如 mux newPipe 失败，直接把这个 dead 返回，并设置 error 是这样吗？
+	wire   []atomic.Value   //@question: tcp 连接池？
+	sc     []*singleconnect // 和 wire 一一对应，每个 wire 一个 tcp 连接
+	mu     []sync.Mutex     // 和 wire 一一对应，每个 wire 一个互斥锁
+	pool   *pool            // 阻塞的命令共享的连接池， 比如 bpop
+	wireFn wireFn           // new 出一个 pipe 对象，每个 pipe 持有一个 tcp 连接，用于 redis 交互
+	dst    string           // 目标 redis ip 端口
 }
 
 func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
@@ -77,6 +80,9 @@ func newMux(dst string, option *ClientOption, init, dead wire, wireFn wireFn) *m
 		sc:   make([]*singleconnect, multiplex),
 	}
 	for i := 0; i < len(m.wire); i++ {
+		// 初始化 wire，init 可能是 (*pipe)(nil)
+		// 为什么初始化有类型的 nil 值呢？
+		// 才有是为了之后 Load 不用断言了，方便
 		m.wire[i].Store(init)
 	}
 	m.pool = newPool(option.BlockingPoolSize, dead, wireFn)
